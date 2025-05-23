@@ -1,11 +1,15 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/base32"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type longURL struct {
@@ -42,14 +46,16 @@ func generateshortString(w http.ResponseWriter, r *http.Request) {
 	longURL := jsonData.URL
 	encoded := base32.StdEncoding.EncodeToString([]byte(longURL))
 	//	fmt.Println(encoded[:8])
-	mapping[encoded[:8]] = longURL
+	InsertIntoDB(encoded[:8], longURL)
+	//	mapping[encoded[:8]] = longURL
 	w.Write([]byte(encoded[:8]))
 
 }
 
 func redirectHandler(w http.ResponseWriter, r *http.Request) {
 	shortURL := r.URL.Path[1:]
-	longURL, ok := mapping[shortURL]
+	//longURL, ok := mapping[shortURL]
+	longURL, ok := QueryFromDB(shortURL)
 	if ok {
 		http.Redirect(w, r, longURL, http.StatusTemporaryRedirect)
 	} else {
@@ -79,7 +85,79 @@ func redirectHandler(w http.ResponseWriter, r *http.Request) {
 //		mapping[customURL[:8]] = longURL
 //
 // }
+func tryDBconnect() {
+	db, err := sql.Open("sqlite3", "./main.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+	//TODO: short urls can clash, so come up with a better db design
+	sqlStmt := `
+	CREATE TABLE IF NOT EXISTS urls(
+        short_url VARCHAR NOT NULL PRIMARY KEY ,
+				long_url VARCHAR NOT NULL 
+
+    );
+	`
+
+	result, err := db.Exec(sqlStmt)
+	fmt.Println(result.RowsAffected())
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Table 'urls' created successfully!")
+
+}
+func InsertIntoDB(short_url string, long_url string) {
+	db, err := sql.Open("sqlite3", "./main.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+	sqlStmt := `
+	INSERT INTO urls(short_url, long_url) values($1,$2)
+	`
+
+	_, err = db.Exec(sqlStmt, short_url, long_url)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("inserted values successfully")
+
+}
+func QueryFromDB(short_url string) (string, bool) {
+	db, err := sql.Open("sqlite3", "./main.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+	sqlStmt := `
+	SELECT long_url from urls where short_url=$1;
+	`
+
+	rows, err := db.Query(sqlStmt, short_url)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var temp string
+		err = rows.Scan(&temp)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("long_url: %s", temp)
+		return temp, true
+	}
+	if err = rows.Err(); err != nil {
+		log.Fatal(err)
+	}
+	return "kahitri gandlay", false
+}
 func main() {
+	tryDBconnect()
+	//	InsertIntoDB("something", "somethinglong")
+	//	QueryFromDB("something")
 	http.HandleFunc("/shorten", generateshortString)
 	//	http.HandleFunc("/custom", customShortener)
 	http.HandleFunc("/", redirectHandler)
