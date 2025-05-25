@@ -16,7 +16,8 @@ type longURL struct {
 	URL string
 }
 type customURL struct {
-	URL string
+	LongURL   string `json:"URL"`
+	CustomKey string `json:"customKey"`
 }
 
 var mapping = map[string]string{}
@@ -63,28 +64,44 @@ func redirectHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-//	func customShortener(w http.ResponseWriter, r *http.Request) {
-//		defer r.Body.Close()
-//		body, err1 := io.ReadAll(r.Body)
-//		if err1 != nil {
-//			w.WriteHeader(400)
-//			w.Write([]byte("INVALID BODY"))
-//		} else {
-//			fmt.Println(string(body))
-//		}
-//
-//		var jsonData customURL
-//		err2 := json.Unmarshal(body, &jsonData)
-//		if err2 != nil {
-//			w.WriteHeader(400)
-//			w.Write([]byte("INVALID JSON"))
-//		} else {
-//			fmt.Println(jsonData)
-//		}
-//
-//		mapping[customURL[:8]] = longURL
-//
-// }
+func customShortener(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		w.WriteHeader(400)
+		w.Write([]byte("INVALID BODY"))
+		return
+	}
+
+	var jsonData customURL
+	err = json.Unmarshal(body, &jsonData)
+	if err != nil {
+		w.WriteHeader(400)
+		w.Write([]byte("INVALID JSON"))
+		return
+	}
+
+	if jsonData.LongURL == "" || jsonData.CustomKey == "" {
+		w.WriteHeader(400)
+		w.Write([]byte("MISSING REQUIRED FIELDS"))
+		return
+	}
+
+	// check for existing custom mapping
+	_, exists := QueryFromDB(jsonData.CustomKey)
+	if exists {
+		w.WriteHeader(409)
+		w.Write([]byte("CUSTOM KEY ALREADY EXISTS, USE SOMETHING ELSE"))
+		return
+	}
+
+	InsertIntoDB(jsonData.CustomKey, jsonData.LongURL)
+
+	w.WriteHeader(200)
+	w.Write([]byte("URL shortened successfully"))
+}
+
 func tryDBconnect() {
 	db, err := sql.Open("sqlite3", "./main.db")
 	if err != nil {
@@ -146,7 +163,7 @@ func QueryFromDB(short_url string) (string, bool) {
 		if err != nil {
 			log.Fatal(err)
 		}
-		log.Printf("long_url: %s", temp)
+		log.Printf("short_url : %s long_url: %s", short_url, temp)
 		return temp, true
 	}
 	if err = rows.Err(); err != nil {
@@ -159,7 +176,7 @@ func main() {
 	//	InsertIntoDB("something", "somethinglong")
 	//	QueryFromDB("something")
 	http.HandleFunc("/shorten", generateshortString)
-	//	http.HandleFunc("/custom", customShortener)
+	http.HandleFunc("/custom", customShortener)
 	http.HandleFunc("/", redirectHandler)
 	fmt.Println("Server running on port 8080")
 	http.ListenAndServe(":8080", nil)
